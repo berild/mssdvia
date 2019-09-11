@@ -1,0 +1,159 @@
+---
+title: "Inverse Problem of Diffusion"
+author: "Martin Outzen Berild"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: pdf_document
+---
+```{r loadlibs, echo = F, include=F}
+library(tidyverse)
+```
+We consider an inverse problem with a basis in the following differential equation 
+\begin{equation}
+\frac{du(x,t)}{dt} = \frac{d^2u(x,t)}{dx^2}, \enspace u(x,0) = h_0(x), \enspace x \in (0,1), t \ge 0.
+\end{equation}
+Data is $u(x,t) = h_t(x)$ for a given time $t>0$. The aim of the inverse problem is $h_0(x)$.
+
+The forward model can be written as 
+\begin{equation}
+u(x,t) = h_t(x) = \frac{1}{\sqrt{4\pi t}}\int e^{-(x-y)^2/(4t)}h_0(y)dy, \enspace t\ge0.
+\end{equation}
+Using discretization we get
+
+\begin{equation}
+ \bf{h}_t = \left[
+  \begin{array}{c}
+    h_t(x_1)\\
+    h_t{x_2}\\
+    \vdots \\ 
+    h_t{x_N}
+  \end{array}
+ \right] = A \left[
+ \begin{array}{c}
+    h_0{x_1}\\
+    h_0{x_2}\\
+    \vdots\\
+    h_0{x_N}
+ \end{array}\right]
+ = A\bf{h}_0 ,
+\end{equation}
+where a regular grid of N = 100 points is used, such that $x_1 = 0$, $x_2 = 0.01$, ..., $x_N = 0.99$. The sequence $x$ is created in **R** by the the code
+```{r createX}
+x = seq(from = 0, to = 0.99, by = 0.01)
+```
+The interval (0,1) is made into a circle, i.e. 1 corresponds to 0. The matrix A has elements
+\begin{equation}
+A(i,j) = \frac{0.01}{\sqrt{4\pi t}}e^{-|x_i - x_j|^2/(4t)}.
+\end{equation}
+The distance $|x_i-x_j|$ is modular on the circle (0,1).
+The *createA* function in below calculates the matrix $A$ for a given position $x$ and time $t$
+```{r createA}
+createA <- function(x,t){
+  A = diag(0.01/sqrt(4*pi*t), nrow = length(x), ncol = length(x))
+  for (i in seq(1,length(x)-1)){
+    for (j in seq(i+1,length(x))){
+      A[i,j] = 0.01/sqrt(4*pi*t)*exp(-(x[i]-x[j])^2/(4*t))
+      A[j,i] = A[i,j]
+    }
+  }
+  A
+}
+```
+
+Measurements $\bf{y} = (y_1,...,y_N)'$ are acquired at time t = 0.001 (1ms): 
+\begin{equation}
+y_i = h_t(x_i) + \epsilon_i, \enspace \epsilon_i \sim \mathcal{N}(0, 0.025^2), \enspace \mathrm{iid}.
+\end{equation}
+
+The observations $y$ are downloaded, imported into **R** and converted to vector form. 
+```{r read_data}
+y = read.delim2(file = "OppgA.txt", header = F, sep = "\n", dec = ".")[[1]]
+```
+
+The observations are presented in Figure \ref{fig:datafig}
+
+```{r datafig, echo = F, fig.width=4,fig.height=4,fig.cap="\\label{fig:datafig}Observations  $(y_1,...y_{100})'$ that are informative of the latent process $h_t(x)$ at time $t=1$ms."}
+df = data.frame(x = x, y = y)
+ggplot(df, aes(x = x, y = y)) + 
+  geom_point() + 
+  theme_classic()
+```
+
+
+# Exercise a
+
+We want to solve the inverse problem directly by $A^{-1}\bf{y}$. First we compute the eigenvalues of the matrix. The observations $y$ are collected at time $t = 1$ms, and we firstly initialize the matrix A.
+
+```{r initA}
+A = createA(x,t = 0.001)
+```
+
+The eigenvalues of $A$ can easily be calculated in **R** and are shown in Figure \ref{fig:eigfig}.
+```{r calc_eigen}
+S = eigen(A)[[1]]
+```
+
+```{r eigAfig, echo = F, fig.width=4,fig.height=4,fig.cap="\\label{fig:eigfig}Eigenvalues of $A$ at time $t = 1$ms"}
+eig.df <- data.frame(i = seq(length(S)), values = S)
+ggplot(eig.df, aes(x = i, y = values)) +
+  geom_point() + 
+  theme_classic()
+```
+
+
+The singular value decomposition can be found by finding the eigenvectors of $A^TA$ and $AA^T$. Then since our matrix $A$ is square we can use its eigenvalues in the formula 
+\begin{equation}
+A = USV^T, 
+\end{equation}
+where $U$ contains the eigenvectors of $AA^T$, $V$ the eigenvectors of $A^TA$ and $S$ the eigenvalues of $A$. 
+
+```{r svd}
+U = eigen(A%*%t(A))[[2]]
+V = eigen(t(A)%*%A)[[2]]
+```
+
+We want to approximate this solution using a filter. The approximation is given by
+\begin{equation}
+\bf{\hat{h}}_0 = \sum\limits_{\{i:\sigma_i>0\}} \phi_i(\alpha) \frac{<u_i,y>}{\sigma_i}v_i,
+\end{equation}
+where $\phi_i(\alpha)$ is the filter applied. In our case we want to truncate the small eigenvalue of $A$, and this is done by the truncated singular value expansion which uses the filter $\phi_i(\alpha) = I\{\sigma_i>\alpha\}$. The choice of $\alpha$ which yields the best solution is not known however. 
+
+```{r tsvd}
+trunc.svd <- function(alpha,y,U,S,V){
+  res = numeric(length(S))
+  for (i in seq(length(S))){
+    if(S[i]>alpha){
+      res = res + (U[,i]*y)/S[i]*V[,i]
+    }
+  }
+  res
+}
+
+h0 <- trunc.svd(alpha = 0.2, y,U,S,V)
+```
+
+
+```{r tsvdfig, echo = F}
+tsvd.df <- data.frame(x = x, h0 = h0)
+ggplot(tsvd.df, aes(x = x, y = h0)) + 
+  geom_point() + 
+  theme_classic()
+```
+```{r bestalpha,echo = F}
+find_alpha<-function(y,U,S,V,A){
+  alpha = seq(0.01,1,0.01)
+  error = c()
+  for (i in alpha){
+    h0 = trunc.svd(i,y,U,S,V)
+    error = c(error, mean((y - A%*%h0)^2))
+  }
+  data.frame(alpha = alpha, error = error)
+}
+res = find_alpha(y,U,S,V,A)
+ggplot(res, aes(x = alpha, y = error)) + 
+  geom_point()
+```
+
+
+# Exercise b
+
+# Exercise c
