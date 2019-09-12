@@ -122,38 +122,138 @@ trunc.svd <- function(alpha,y,U,S,V){
   res = numeric(length(S))
   for (i in seq(length(S))){
     if(S[i]>alpha){
-      res = res + (U[,i]*y)/S[i]*V[,i]
+      res = res + (((U[,i]%*%y)[[1]])/S[i])*V[,i]
     }
   }
   res
 }
-
+tsvd <- function(alpha, y, U, S, V){
+  S = S*(S>alpha)
+  ((V%*%diag(1/S)%*%t(U))%*%y)[[1]]
+}
+h0 <- tsvd(alpha = 0.1,y,U,S,V)
 h0 <- trunc.svd(alpha = 0.2, y,U,S,V)
 ```
 
 
-```{r tsvdfig, echo = F}
+```{r tsvdfig, echo = F, fig.width=4,fig.height=4,fig.cap="\\label{fig:h0fig1}$\bf{h}_0(x_i) visualized against the $x_i$ values."}
 tsvd.df <- data.frame(x = x, h0 = h0)
 ggplot(tsvd.df, aes(x = x, y = h0)) + 
   geom_point() + 
   theme_classic()
 ```
-```{r bestalpha,echo = F}
+```{r bestalpha,echo = F, fig.width=4,fig.height=4,fig.cap="\\label{fig:h0figopt}Finding the optimal value of \alpha by iteration. Optimal solution is $0.03$, truncating eigenvalues of A that are less."}
 find_alpha<-function(y,U,S,V,A){
-  alpha = seq(0.01,1,0.01)
-  error = c()
-  for (i in alpha){
-    h0 = trunc.svd(i,y,U,S,V)
-    error = c(error, mean((y - A%*%h0)^2))
-  }
-  data.frame(alpha = alpha, error = error)
+ alpha = seq(0.00001,1,0.001)
+ error = c()
+ for (i in alpha){
+   h0 = tsvd(i,y,U,S,V)
+   error = c(error, mean((y - A%*%h0)^2))
+ }
+ data.frame(alpha = alpha, error = error)
 }
 res = find_alpha(y,U,S,V,A)
-ggplot(res, aes(x = alpha, y = error)) + 
-  geom_point()
+best_alpha = res$alpha[which.min(res$error)]
+ggplot(res, aes(x = alpha, y = error)) +
+ geom_point() +
+ geom_vline(xintercept = best_alpha, color = "red")
 ```
 
 
 # Exercise b
 
+Assume that we now add prior information to $\bf{h}_0$ in the form of a Gaussian prior, $\bf{h}_0 \sim \mathcal{N}(0,\bf{I})$. We want to find the posterior expectation $E(\bf{h}_0|\bf{y})$. We also have knowledge that the error $\bf{\epsilon} \sim \mathcal{N}(0,0.25^2\bf{I})$. We have the linear relationship $\bf{y} = A\bf{h}_0 + \bf{\epsilon}$ and we have the posterior distribution given by
+\begin{equation*}
+p(\bf{h}_0|\bf{y}) = \frac{p(\bf{y},\bf{h}_0)}{p(\bf{y})} = \frac{p(\bf{y}|\bf{h}_0)p(\bf{h}_0)}{p(\bf{y})}.
+\end{equation*}
+It is hard to anytically find the posterior mean, but if we represent the gaussian random function $H_0$ and $\epsilon$ by the Karhunen-Loève expansion given by
+\begin{equation*}
+\begin{array}{rcl}
+H_0 &=& \sum\limits_{i=1}^\infty H_{0,i}\bf{v}_i \\
+\epsilon &=& \sum\limits_{i=1}^\infty \epsilon_i \bf{v}_i , 
+\end{array}
+\end{equation*}
+this will make the estimation easier. 
+This makes $\{H_0\}_{i=1}^\infty$ be independent Gaussian random variable with mean $\mu_i$ and variance $\gamma_i^2$, and $\{\epsilon_i\}_{i=1}^\infty$ becomes  gaussian random variable with variance $\lambda_i^2$. The matrix $A$ still is represented by the singular system $\{\sigma_i^2,v_i,u_i\}_{i=1}^\infty$, with $\sigma_i$, $u_i$ and $v_i$ being from $S$, $U$ and $V$ respectivly. The posterior random function can also be represented by this Karhunen-Loève expansion given by 
+\begin{equation*}
+(H_0|Y=y) = \sum\limits_{i = 1}^\infty (H_{0,i}|Y_i = y_i)\bf{v}_i,
+\end{equation*}
+with the set $\{(H_{0,i}|Y_i = y_i)\}_{i=1}^\infty$ being independent Gaussian random variables with expected value $y_i\sigma_i/(\sigma_i^2 + \lambda_i^2/\gamma_i^2)$ and variance $\gamma_i^2[1-\sigma_i^2/(\sigma_i^2+\lambda_i^2/\gamma_i^2)]$. This yields the joint posterior expectation
+\begin{equation*}
+E(H_0|Y=y) = \sum\limits_{i=1}^{100} \frac{y_i\sigma_i}{\sigma_i^2 + \frac{\lambda_i^2}{\gamma_i^2}}.
+\end{equation*}
+
+```{r postexp }
+post.expect <- function(lambda,gamma,y,S){
+  res = numeric(length(y))
+  for (i in seq(1,length(y))){
+    res[i] = (y[i]*S[i])/(S[i]^2 + lambda^2/gamma^2)
+  }
+  res
+}
+# lambda = epsilon, gamma = h_0
+e_post <- post.expect(lambda = 0.25, gamma = 1, y, S)
+```
+
+
+Since we have independent random variables they are uncorrelated and therby yielding the join posterior variance 
+\begin{equation*}
+\mathrm{Var}(\sum\limits_{i=1}^{100} (H_{0,i}|Y_i=y_i)) = \sum\limits_{i=1}^{100} \mathrm{Var}(H_{0,i}|Y_i = y_i) = \sum\limits_{i = 1}^{100} \gamma_i^2\left[1 - \frac{\sigma_i^2}{\sigma_i^2 + \frac{\lambda_i^2}{\gamma_i^2}}\right]
+\end{equation*}.
+
+```{r postvar}
+post.var <- function(lambda,gamma,y,S){
+  res = numeric(length(y))
+  for (i in seq(1,length(y))){
+    res[i] = gamma^2*(1-S[i]^2/(S[i]^2 + lambda^2/gamma^2))
+  }
+  res
+}
+var_post <- post.var(lambda = 0.25, gamma = 1, y, S)
+```
+The optimal estimator is the represented by the following equation
+\begin{equation*}
+\hat{\bf{h}}_0 = \sum\limits_{i=1}^{100} \frac{\sigma_i^2}{\sigma_i^2 + \frac{\lambda_i^2}{\gamma_i^2}}\frac{<\bf{u}_i,\bf{y}>}{\sigma_i}\bf{v}_i
+\end{equation*}
+
+```{r baysol}
+bay_sol <- function(lambda,gamma,y,U,S,V){
+  res = numeric(length(y))
+  for (i in seq(length(y))){
+    res = res + (S[i]^2/(S[i]^2 + lambda^2/gamma^2)*((U[,1]%*%y)[[1]])/S[1])*V[,1]
+  }
+  res
+}
+h0 <- bay_sol(lambda = 0.25, gamma = 1, y, U, S, V)
+```
+
+```{r figbaysol, echo = F}
+bay.df <- data.frame(x = x, h0 = h0, e_post = e_post, sd_post = sqrt(var_post))
+ggplot(bay.df,aes(x = x)) + 
+  geom_point(aes(y = h0), color = "deepskyblue") + 
+  geom_errorbar(aes(ymin = e_post - sd_post, ymax = e_post + sd_post))
+```
+
 # Exercise c
+
+We will next assume that the prior information of $\bf{h}_0$ is in the form of the Gaussian prior, $\bf{h}_0 \sim \mathcal{N}(0,\Sigma)$. Where the covariance matrix is given by $\Sigma(i,j) = \exp(-|x_i - x_j|/0.1$. 
+
+```{r creatSig}
+createSig <- function(x){
+  res = diag(1, nrow = length(x), ncol = length(x))
+  for (i in seq(length(x))){
+    for (j in seq(i,length(x))){
+      res[i,j] = exp(-abs(x[i]- x[j])/0.1)
+      res[j,i] = res[i,j]
+    }
+  }
+  res
+}
+sig = createSig(x)
+```
+
+
+```{r baysol2}
+
+```
+
