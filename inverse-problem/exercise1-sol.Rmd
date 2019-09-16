@@ -1,0 +1,277 @@
+---
+title: "Inverse Problem of Diffusion"
+author: "Martin Outzen Berild"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: pdf_document
+---
+```{r loadlibs, echo = F, include=F}
+library(tidyverse)
+library(latex2exp)
+my_theme <- function(...){
+  theme(
+    axis.line = element_line(color = "gray90"),
+    axis.text.x = element_text(color = "black",lineheight = 0.9),
+    axis.text.y = element_text(color = "black",lineheight = 0.9),
+    axis.ticks = element_line(color = "gray65", size=0.2),
+    axis.title.x = element_text(color = "black", margin = margin(0,10,0,0)),
+    axis.title.y = element_text(color = "black", angle = 90, margin= margin(0,10,0,0)), 
+    axis.ticks.length = unit(0.3,"lines"),
+    legend.background = element_rect(color = NA, fill = "white"),
+    legend.key = element_rect(color = "black", fill = "white"),
+    legend.key.size = unit(1.2,"lines"),
+    legend.key.height = NULL,
+    legend.key.width = NULL,
+    legend.text = element_text(color = "black"), 
+    legend.title = element_text(face = "bold", hjust = 0, color = "black"),
+    legend.text.align = NULL,
+    legend.title.align = NULL,
+    legend.direction = "vertical",
+    legend.box = NULL,
+    panel.background = element_rect(fill = "white", color = NA),
+    panel.border = element_blank(),
+    panel.grid.major = element_line(color = "gray90"),
+    panel.grid.minor = element_line(color = "gray95"),
+    panel.spacing = unit(0.5,"lines"),
+    strip.background = element_rect(fill = "white",color = "white"),
+    strip.text.x = element_text(color = "black"),
+    strip.text.y = element_text(color = "blakc"),
+    plot.background = element_rect(color = "white", fill = "white"),
+    plot.title = element_text(color = "black", hjust = 0, lineheight= 1.4,margin=margin(2,2,2,2)),
+    plot.subtitle = element_text(color = "black", hjust = 0, margin = margin(2,2,2,2)),
+    plot.caption = element_text(color = "black", hjust = 0),
+    plot.margin = unit(rep(1,4),"lines")
+  )
+}
+```
+\newcommand{\vect}[1]{\mathbf{#1}}
+We consider an inverse problem with a basis in the following differential equation 
+\begin{equation}
+\frac{du(x,t)}{dt} = \frac{d^2u(x,t)}{dx^2}, \enspace u(x,0) = h_0(x), \enspace x \in (0,1), t \ge 0.
+\end{equation}
+Data is $u(x,t) = h_t(x)$ for a given time $t>0$. The aim of the inverse problem is $h_0(x)$.
+
+The forward model can be written as 
+\begin{equation}
+u(x,t) = h_t(x) = \frac{1}{\sqrt{4\pi t}}\int e^{-(x-y)^2/(4t)}h_0(y)dy, \enspace t\ge0.
+\end{equation}
+Using discretization we get
+
+\begin{equation}
+ \vect{h}_t = \left[
+  \begin{array}{c}
+    h_t(x_1)\\
+    h_t{x_2}\\
+    \vdots \\ 
+    h_t{x_N}
+  \end{array}
+ \right] = A \left[
+ \begin{array}{c}
+    h_0{x_1}\\
+    h_0{x_2}\\
+    \vdots\\
+    h_0{x_N}
+ \end{array}\right]
+ = A\vect{h}_0 ,
+\end{equation}
+where a regular grid of N = 100 points is used, such that $x_1 = 0$, $x_2 = 0.01$, ..., $x_N = 0.99$. The sequence $x$ is created in **R** by the the code
+```{r createX}
+x = seq(from = 0, to = 0.99, by = 0.01)
+```
+The interval (0,1) is made into a circle, i.e. 1 corresponds to 0. The matrix A has elements
+\begin{equation}
+A(i,j) = \frac{0.01}{\sqrt{4\pi t}}e^{-|x_i - x_j|^2/(4t)}.
+\end{equation}
+The distance $|x_i-x_j|$ is modular on the circle (0,1).
+The *createA* function in below calculates the matrix $A$ for a given position $x$ and time $t$
+```{r createA}
+createA <- function(x,t){
+  A = matrix(NA, nrow = length(x), ncol = length(x))
+  for (i in seq(length(x))){
+    for (j in seq(length(x))){
+      d = min(abs(x[i]-x[j]),1-abs(x[i]-x[j]))
+      A[i,j] = 0.01/sqrt(4*pi*t)*exp(-d^2/(4*t))
+    }
+  }
+  A
+}
+```
+
+Measurements $\vect{y} = (y_1,...,y_N)'$ are acquired at time t = 0.001 (1ms): 
+\begin{equation}
+y_i = h_t(x_i) + \epsilon_i, \enspace \epsilon_i \sim \mathcal{N}(0, 0.25^2), \enspace \mathrm{iid}.
+\end{equation}
+
+The observations $y$ are downloaded, imported into **R** and converted to vector form. 
+```{r read_data}
+y = read.delim2(file = "OppgA.txt", header = F, sep = "\n", dec = ".")[[1]]
+```
+The observations are presented in Figure \ref{fig:datafig}
+
+```{r datafig, echo = F, fig.width=5,fig.height=4,fig.cap="\\label{fig:datafig}Observations  $(y_1,...y_{100})'$ that are informative of the latent process $h_t(x)$ at time $t=1$ms."}
+df = data.frame(x = x, y = y)
+ggplot(df, aes(x = x, y = y)) + 
+  geom_point() + 
+  my_theme()
+```
+
+
+# Exercise a
+
+We want to solve the inverse problem directly by $A^{-1}\vect{y}$. First we compute the eigenvalues of the matrix. The observations $y$ are collected at time $t = 1$ms, and we firstly initialize the matrix A.
+
+```{r initA,echo = F,fig.width=5,fig.height=4,fig.cap="\\label{fig:A}A visual representation of the values in $A$."}
+A = createA(x,t = 0.001)
+image(A[,nrow(A):1])
+```
+
+The eigenvalues of $A$ can easily be calculated in **R** and are shown in Figure \ref{fig:eig}.
+
+```{r calc_eigen}
+S = eigen(A)[[1]]
+```
+
+```{r eigAfig, echo = F, fig.width=5,fig.height=4,fig.cap="\\label{fig:eig}The eigenvalues of matrix $A$."}
+eig.df <- data.frame(i = seq(length(S)), values = S)
+ggplot(eig.df, aes(x = i, y = values)) +
+  geom_point() + 
+  labs(y = "eigen values")+ 
+  my_theme()
+```
+
+The singular value decomposition can be found by finding the eigenvectors of $A^TA$ and $AA^T$. Then since our matrix $A$ is square we can use its eigenvalues in the formula 
+\begin{equation}
+A = USV^T, 
+\end{equation}
+where $U$ contains the eigenvectors of $AA^T$, $V$ the eigenvectors of $A^TA$ and $S$ the eigenvalues of $A$. 
+
+```{r svd}
+U = eigen(A%*%t(A))[[2]]
+V = eigen(t(A)%*%A)[[2]]
+```
+
+We want to approximate this solution using a filter. The approximation is given by
+\begin{equation}
+\vect{\hat{h}}_0 = \sum\limits_{\{i:\sigma_i>0\}} \phi_i(\alpha) \frac{<u_i,y>}{\sigma_i}v_i,
+\end{equation}
+where $\phi_i(\alpha)$ is the filter applied. In our case we want to truncate the small eigenvalue of $A$, and this is done by the truncated singular value expansion which uses the filter $\phi_i(\alpha) = I\{\sigma_i>\alpha\}$. The choice of $\alpha$ which yields the best solution is not known however. 
+
+```{r tsvd}
+tsvd <- function(k,y,U,S,V){
+  res = numeric(length(S))
+  for (i in seq(k)){
+      res = res + (((U[,i]%*%y)[[1]])/S[i])*V[,i]
+  }
+  res
+}
+
+h0 <- tsvd(15,y,U,S,V)
+```
+
+
+```{r tsvdfig, echo = F,fig.width=5,fig.height=4,fig.cap="\\label{fig:h0}The solution $h_0$ using $k=15$ largest eigenvalues of $A$."}
+tsvd.df <- data.frame(x = x, h0 = h0,y=y)
+ggplot(tsvd.df, aes(x = x)) + 
+  geom_line(aes(y = h0, color = "h0")) +
+  geom_point(aes(y = y, color = "y")) + 
+  geom_hline(yintercept = 0, linetype = "dashed",color = "gray45") + 
+  labs(y = "",color = "")+
+  my_theme()
+```
+
+# Exercise b
+We now add prior information to $\vect{h}_0$ in the form of a Gaussion prior $\vect{h}_0\sim\mathcal{N}(\vect{0},Q_{\vect{h}_0})$,  where $Q_{\vect{h}_0} = I$ is the precision matrix. We know from earlier that $\vect{y}|\vect{h}_0 \sim \mathcal{N}(A\vect{h}_0, Q_\epsilon)$, where $Q_{\epsilon}$ is the precision matrix, which yields the posterior distribution
+\begin{equation*}
+\begin{array}{rcl}
+p(\vect{h}_0|\vect{y}) &=& \frac{p(\vect{h}_0,\vect{y})}{p(\vect{y})}\\
+&\propto& p(\vect{y}|\vect{h}_0)p(\vect{h}_0) \\ 
+&\propto& \exp\{-\frac{1}{2}((\vect{y} - A\vect{h})^TQ_\epsilon(\vect{y}-A\vect{h}_0) + \vect{h}_0^TQ_{\vect{h}_0}\vect{h}_0)\}.
+\end{array}
+\end{equation*}
+We want to find the Maximum Aposterior Prediction(MAP) of the $\vect{h}_0$, which is found by
+\begin{equation*}
+\begin{array}{rcl}
+\vect{\hat{h}}_0 &=& \underset{\vect{h}_0}{\mathrm{argmin}}\{\vect{y}^TQ_\epsilon\vect{y} - \vect{y}^TQ_\epsilon(A\vect{h}_0) - (A\vect{h}_0)^TQ_\epsilon\vect{y} + (A\vect{h}_0)^TQ_\epsilon(A\vect{h}_0) + \vect{h}_0^TQ_{\vect{h}_0}\vect{h}_0\} \\ 
+& & \\
+0 &=& -2\vect{y}^TQ_\epsilon(A\vect{1}) + 2(A\vect{1})^TQ_\epsilon(A\vect{h}_0) + 2 \cdot\vect{1}^TQ_{\vect{h}_0}\vect{h}_0\\ 
+& & \\
+\vect{\hat{h}}_0 &=& \left[A^TQ_\epsilon A + Q_{\vect{h}_0}\right]^{-1}\vect{y}^TQ_\epsilon A, \hspace{5em} Q_{\vect{\hat{h}}_0} = A^TQ_\epsilon A + Q_{\vect{h}_0}.
+\end{array}
+\end{equation*}
+The function *post.h0()* calculates the prediction $\vect{\hat{h}}_0$ and the standard deviation. 
+```{r posth0}
+Q_e = 4^2*diag(length(y))
+Q_h0 = diag(length(y))
+post.h0 <- function(y,A,Q_e, Q_h0){
+  Q_post = (t(A)%*%Q_e)%*%A + Q_h0
+  covar_post = solve(Q_post)
+  data.frame(steps = seq(length(y)),
+             y = y,
+             mu = covar_post%*%(t((t(y)%*%Q_e)%*%A)), 
+             stdev = sqrt(diag(covar_post)))
+  
+}
+h0.res = post.h0(y,A,Q_e,Q_h0)
+```
+Uncertainty bounds are found with a 95\% confidence interterval, which means that $\vect{\hat{h}}_0 \pm 1.96\mathrm{sd}(\vect{\hat{h}}_0)$. The result of the MAP is presented in figure \ref{fig:h0post1} with uncertainty bounds. In this plot it is shown that the uncertainty bounds is relativly large, which means that our model isn't a very accurate predictor.
+
+```{r figposth0,echo = F, fig.width=5,fig.height=4,fig.cap="\\label{fig:h0post1}Maximum Aposterior Prediction of $h_0$."}
+ggplot(h0.res,aes(x=steps)) + 
+  geom_line(aes(y = mu, color = "h0")) + 
+  geom_point(aes(y = y,color = "y")) + 
+  geom_ribbon(aes(ymin = mu - 1.96*stdev, ymax = mu + 1.96*stdev),alpha = 0.3) + 
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray45") + 
+  labs(y = "", color = "") + 
+  my_theme()
+```
+
+# Exercise c
+
+We will use different prior information $\vect{h}_0 \sim \mathcal{N}(\vect{0},\Sigma)$, where the covariance matrix is given by the equation
+\begin{equation*}
+\Sigma(i,j) = \exp\{-|x_i-x_j|/0.1\},
+\end{equation*}
+where $|x_i-x_j|$ is modular on the circle, and calculated like previously. 
+
+```{r createQh0}
+createQh0 <- function(x){
+  Q_h0 = matrix(NA, nrow = length(x), ncol = length(x))
+  for (i in seq(length(x))){
+    for (j in seq(length(y))){
+      d = min(abs(x[i]-x[j]),1-abs(x[i]-x[j]))
+      Q_h0[i,j] = exp(-d/0.1)
+    }
+  }
+  solve(Q_h0)
+}
+Q_h0 = createQh0(x)
+```
+
+We still use the function *post.h0* from Exercise b to find the expectation and standard deviation. 
+
+```{r posth02}
+h0.res2 = post.h0(y,A,Q_e,Q_h0)
+``` 
+
+```{r figposth02,echo = F, fig.width=5,fig.height=4,fig.cap="\\label{fig:h0post2}Maximum Aposterior Prediction of $h_0$."}
+ggplot(h0.res2,aes(x=steps)) + 
+  geom_line(aes(y = mu, color = "h0")) + 
+  geom_point(aes(y = y, color = "y")) + 
+  geom_ribbon(aes(ymin = mu - 1.96*stdev, ymax = mu + 1.96*stdev),alpha = 0.3) + 
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray45") + 
+  labs(y = "",color = "") + 
+  my_theme()
+```
+
+In Figure \ref{fig:h0post2} the result of the MAP of $\vect{h}_0$ is presented, and we observe that the uncertainty bounds are smaller than for the prediction in Figure \ref{fig:h0post1}. As for the estimation shown in Figure \ref{fig:h0} where we used the truncated singular value expansion we lack the uncertainty bounds. A comparison between the models is shown in Figure \ref{fig:totfig}, where we can see that the MAP predictions are close to similar, but with larger uncertainty bounds on the model from exercise b. We also observe that the TSVD solution has some similarity with the other solution, but differs alot at some points. 
+
+```{r totfig, echo = F, fig.width=5,fig.height=4,fig.cap="\\label{fig:totfig}All prediction models presented together. The model from Exercise b is presented in *red* with corresponding uncertainty bounds, the model from Exercise c is green with corresponding uncertainty bounds, and TSVD solution is presented in blue."}
+tot.df <- data.frame(steps = seq(length(y)),tsvd = h0, MAP1 = h0.res$mu, MAP1sd = h0.res$stdev, MAP2 = h0.res2$mu, MAP2sd = h0.res2$stdev, y = y)
+ggplot(tot.df,aes(x=x)) + 
+  geom_ribbon(aes(ymin = MAP1 - MAP1sd, ymax = MAP1 + MAP1sd, color = "MAP1"),alpha=0.3,fill = "firebrick") + 
+  geom_ribbon(aes(ymin = MAP2 - MAP2sd, ymax = MAP2 + MAP2sd, color = "MAP2"),alpha= 0.3,fill = "springgreen") + 
+  geom_line(aes(y=tsvd,color = "tsvd"),size = 1) + 
+  geom_line(aes(y =MAP1, color = "MAP1"),size = 1) + 
+  geom_line(aes(y = MAP2, color = "MAP2"),size = 1) + 
+  labs(y = "", fill = "", color = "")+
+  my_theme()
+```

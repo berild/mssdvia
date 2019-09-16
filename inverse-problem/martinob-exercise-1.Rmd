@@ -119,17 +119,16 @@ We want to approximate this solution using a filter. The approximation is given 
 where $\phi_i(\alpha)$ is the filter applied. In our case we want to truncate the small eigenvalue of $A$, and this is done by the truncated singular value expansion which uses the filter $\phi_i(\alpha) = I\{\sigma_i>\alpha\}$. The choice of $\alpha$ which yields the best solution is not known however. 
 
 ```{r tsvd}
-tsvd <- function(alpha,y,U,S,V){
+tsvd <- function(k,y,U,S,V){
   res = numeric(length(S))
-  for (i in seq(length(S))){
-    if(S[i]>alpha){
+  for (i in seq(k)){
       res = res + (((U[,i]%*%y)[[1]])/S[i])*V[,i]
-    }
   }
   res
 }
 
-h0 <- tsvd(alpha = 0.1,y,U,S,V)
+h0 <- tsvd(15,y,U,S,V)
+data.frame(y1 = A%*%h0,y =y)
 ```
 
 
@@ -147,7 +146,7 @@ Assume that we now add prior information to $\bf{h}_0$ in the form of a Gaussian
 \begin{equation*}
 p(\bf{h}_0|\bf{y}) = \frac{p(\bf{y},\bf{h}_0)}{p(\bf{y})} = \frac{p(\bf{y}|\bf{h}_0)p(\bf{h}_0)}{p(\bf{y})}.
 \end{equation*}
-It is hard to anytically find the posterior mean, but if we represent the gaussian random function $H_0$ and $\epsilon$ by the Karhunen-Loève expansion given by
+It is hard to anytically find the posterior mean, but if we represent the gaussian random function $H_0$ and $\epsilon$ by the Karhunen-Lo?ve expansion given by
 \begin{equation*}
 \begin{array}{rcl}
 H_0 &=& \sum\limits_{i=1}^\infty H_{0,i}\bf{v}_i \\
@@ -155,7 +154,7 @@ H_0 &=& \sum\limits_{i=1}^\infty H_{0,i}\bf{v}_i \\
 \end{array}
 \end{equation*}
 this will make the estimation easier. 
-This makes $\{H_0\}_{i=1}^\infty$ be independent Gaussian random variable with mean $\mu_i$ and variance $\gamma_i^2$, and $\{\epsilon_i\}_{i=1}^\infty$ becomes  gaussian random variable with variance $\lambda_i^2$. The matrix $A$ still is represented by the singular system $\{\sigma_i^2,v_i,u_i\}_{i=1}^\infty$, with $\sigma_i$, $u_i$ and $v_i$ being from $S$, $U$ and $V$ respectivly. The posterior random function can also be represented by this Karhunen-Loève expansion given by 
+This makes $\{H_0\}_{i=1}^\infty$ be independent Gaussian random variable with mean $\mu_i$ and variance $\gamma_i^2$, and $\{\epsilon_i\}_{i=1}^\infty$ becomes  gaussian random variable with variance $\lambda_i^2$. The matrix $A$ still is represented by the singular system $\{\sigma_i^2,v_i,u_i\}_{i=1}^\infty$, with $\sigma_i$, $u_i$ and $v_i$ being from $S$, $U$ and $V$ respectivly. The posterior random function can also be represented by this Karhunen-Lo?ve expansion given by 
 \begin{equation*}
 (H_0|Y=y) = \sum\limits_{i = 1}^\infty (H_{0,i}|Y_i = y_i)\bf{v}_i,
 \end{equation*}
