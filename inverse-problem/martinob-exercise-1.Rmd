@@ -85,7 +85,7 @@ We want to solve the inverse problem directly by $A^{-1}\bf{y}$. First we comput
 
 ```{r initA}
 A = createA(x,t = 0.001)
-plot(A)
+image(A[,nrow(A):1])
 ```
 
 The eigenvalues of $A$ can easily be calculated in **R** and are shown in Figure \ref{fig:eigfig}.
@@ -129,7 +129,7 @@ tsvd <- function(alpha,y,U,S,V){
   res
 }
 
-h0 <- tsvd(alpha = 0.0001,y,U,S,V)
+h0 <- tsvd(alpha = 0.1,y,U,S,V)
 ```
 
 
@@ -139,22 +139,6 @@ ggplot(tsvd.df, aes(x = x, y = h0)) +
   geom_point() + 
   theme_classic()
 ```
-```{r bestalpha,echo = F, fig.width=4,fig.height=4,fig.cap="\\label{fig:h0figopt}Finding the optimal value of \alpha by iteration. Optimal solution is $0.03$, truncating eigenvalues of A that are less."}
-find_alpha<-function(y,U,S,V,A){
- alpha = seq(0.00001,1,0.001)
- error = c()
- for (i in alpha){
-   h0 = tsvd(i,y,U,S,V)
-   error = c(error, mean((y - A%*%h0)^2))
- }
- data.frame(alpha = alpha, error = error)
-}
-res = find_alpha(y,U,S,V,A)
-best_alpha = res$alpha[which.min(res$error)]
-ggplot(res, aes(x = alpha, y = error)) +
- geom_point() +
- geom_vline(xintercept = best_alpha, color = "red")
-```
 
 
 # Exercise b
@@ -163,7 +147,7 @@ Assume that we now add prior information to $\bf{h}_0$ in the form of a Gaussian
 \begin{equation*}
 p(\bf{h}_0|\bf{y}) = \frac{p(\bf{y},\bf{h}_0)}{p(\bf{y})} = \frac{p(\bf{y}|\bf{h}_0)p(\bf{h}_0)}{p(\bf{y})}.
 \end{equation*}
-It is hard to anytically find the posterior mean, but if we represent the gaussian random function $H_0$ and $\epsilon$ by the Karhunen-LoÃ¨ve expansion given by
+It is hard to anytically find the posterior mean, but if we represent the gaussian random function $H_0$ and $\epsilon$ by the Karhunen-Loève expansion given by
 \begin{equation*}
 \begin{array}{rcl}
 H_0 &=& \sum\limits_{i=1}^\infty H_{0,i}\bf{v}_i \\
@@ -171,7 +155,7 @@ H_0 &=& \sum\limits_{i=1}^\infty H_{0,i}\bf{v}_i \\
 \end{array}
 \end{equation*}
 this will make the estimation easier. 
-This makes $\{H_0\}_{i=1}^\infty$ be independent Gaussian random variable with mean $\mu_i$ and variance $\gamma_i^2$, and $\{\epsilon_i\}_{i=1}^\infty$ becomes  gaussian random variable with variance $\lambda_i^2$. The matrix $A$ still is represented by the singular system $\{\sigma_i^2,v_i,u_i\}_{i=1}^\infty$, with $\sigma_i$, $u_i$ and $v_i$ being from $S$, $U$ and $V$ respectivly. The posterior random function can also be represented by this Karhunen-LoÃ¨ve expansion given by 
+This makes $\{H_0\}_{i=1}^\infty$ be independent Gaussian random variable with mean $\mu_i$ and variance $\gamma_i^2$, and $\{\epsilon_i\}_{i=1}^\infty$ becomes  gaussian random variable with variance $\lambda_i^2$. The matrix $A$ still is represented by the singular system $\{\sigma_i^2,v_i,u_i\}_{i=1}^\infty$, with $\sigma_i$, $u_i$ and $v_i$ being from $S$, $U$ and $V$ respectivly. The posterior random function can also be represented by this Karhunen-Loève expansion given by 
 \begin{equation*}
 (H_0|Y=y) = \sum\limits_{i = 1}^\infty (H_{0,i}|Y_i = y_i)\bf{v}_i,
 \end{equation*}
@@ -179,6 +163,48 @@ with the set $\{(H_{0,i}|Y_i = y_i)\}_{i=1}^\infty$ being independent Gaussian r
 \begin{equation*}
 E(H_0|Y=y) = \sum\limits_{i=1}^{100} \frac{y_i\sigma_i}{\sigma_i^2 + \frac{\lambda_i^2}{\gamma_i^2}}.
 \end{equation*}
+
+```{r test}
+Q_e = 4*diag(length(y))
+Q_h0 = diag(length(y))
+test123<- function(y,Q_e,A,Q_h0){
+  mu_h0 = numeric(length(y))
+  eta = (t(y)%*%Q_e)%*%A + mu_h0%*%Q_h0
+  Sigma = (t(A)%*%Q_e)%*%A + Q_h0
+  var_post = solve(Sigma)
+  e_post = Sigma%*%t(eta)
+  return(list(e_post = e_post,var_post=var_post))
+}
+res = test123(y,Q_e,A,Q_h0)
+post.h0 = data.frame(i = seq(length(y)),expect = res$e_post, stdev = sqrt(diag(res$var_post)))
+ggplot(post.h0,aes(x=i)) + 
+  geom_point(aes(y = expect), color = "deepskyblue") + 
+  geom_errorbar(aes(ymin = expect - stdev, ymax = expect + stdev))
+```
+
+```{r test2}
+createQh0 <- function(x){
+  Q_h0 = matrix(NA, nrow = length(x), ncol = length(x))
+  for (i in seq(length(x))){
+    for (j in seq(length(y))){
+      d = min(abs(x[i]-x[j]),1-abs(x[i]-x[j]))
+      Q_h0[i,j] = exp(-d/0.1)
+    }
+  }
+  solve(Q_h0)
+}
+Q_h0 = createQh0(x)
+res2 = test123(y,Q_e,A,Q_h0)
+post2 = data.frame(i = seq(length(y)), 
+                   y= y, 
+                   expect = res2$e_post, 
+                   lb = res2$e_post - 1.96*sqrt(diag(res2$var_post)), 
+                   ub = res2$e_post + 1.96*sqrt(diag(res2$var_post)))
+ggplot(post2, aes(x = i)) + 
+  geom_point(aes(y = y),color = "deepskyblue") +
+  geom_line(aes(y = expect), color = "firebrick") + 
+  geom_ribbon(aes(ymin = lb, ymax = ub),alpha = 0.3)
+```
 
 ```{r postexp }
 post.expect <- function(lambda,gamma,y,S){
