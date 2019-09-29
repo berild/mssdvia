@@ -1,9 +1,11 @@
-import numpy as np
-from scipy.spatial import distance
-from scipy import linalg
+import numpy as np 
 import matplotlib.pyplot as plt
 import seaborn as sns
 from random import sample
+import pandas as pd
+import random
+from scipy.spatial import distance
+from scipy import linalg
 
 def create_samples(m,sigma,eta,tau,alpha):
     x = np.zeros((m , 2))
@@ -48,6 +50,17 @@ def partial_derivative(theta, x): # theta = [sigma^2, eta, tau^2],
 def calc_likelihood(C, Q, h, y, beta):
     return(-(1/2)*np.log(np.linalg.det(C))-(1/2)*np.transpose(y-h*beta)@Q@(y-h*beta))  
 
+# calculate covariance matrix
+def calc_C(theta,x):
+    C = np.identity(m)*(theta[0]+theta[2])
+    for i in range(1, m):
+        for j in range(i+1, m):
+            t_ij = abs(distance.euclidean(x[i,1:], x[j,1:]))
+            C[i, j] = theta[0]*(1+theta[1]*t_ij)*np.exp(-theta[1]*t_ij)
+            C[j, i] = C[i, j]
+    Q = np.linalg.inv(C)
+    return(C,Q)
+
 # Fisher Scoring for optimization of log-likelihood
 def make_score(Q, h, x, y, theta, beta):
     part_vec = partial_derivative(theta, x)
@@ -72,7 +85,7 @@ def newton_raphson(x,h,y):
     likelihood = 100
     while rho > tol:
         C, Q = calc_C(theta,x)
-        beta = 1/(np.transpose(h)@Q@h)@np.transpose(h)@Q@y
+        beta = 1/(np.transpose(h)@Q@h)*np.transpose(h)@Q@y
         theta = theta-make_score(Q, h, x, y, theta, beta)
         prev_likelihood = likelihood
         likelihood = calc_likelihood(C, Q, h, y, beta)
